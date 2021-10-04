@@ -6,9 +6,7 @@ pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
 // These are the core Yearn libraries
-import {
-    BaseStrategyInitializable
-} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
+import {BaseStrategy} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
 
 import {
     SafeERC20,
@@ -23,7 +21,6 @@ import "../interfaces/uniswap/IUni.sol";
 import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
 
 import "../interfaces/aave/IStakedAave.sol";
-
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -49,30 +46,44 @@ contract Strategy is BaseStrategy {
         ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
     // OPS State Variables
-    uint24 public stkAaveToAaveSwapFee = 10000;
-
-    uint16 private constant referral = 7; // Yearn's aave referral code
+    uint24 public aaveToStkAaveSwapFee = 10000;
+    uint256 private stkAaveDiscountBps = 350;
 
     uint256 private constant MAX_BPS = 1e4;
 
-    constructor(address _vault) public BaseStrategyInitializable(_vault) {
+    constructor(address _vault) public BaseStrategy(_vault) {
         _initializeThis();
     }
 
     function _initializeThis() internal {
         require(address(want) == address(aave));
 
-        stkAaveToAaveSwapFee = 10000;
+        aaveToStkAaveSwapFee = 10000;
+        stkAaveDiscountBps = 350;
 
         // approve swap router spend
         approveMaxSpend(address(stkAave), address(UNI_V3_ROUTER));
         approveMaxSpend(aave, address(UNI_V3_ROUTER));
     }
 
-    function setSwapFee(
-        uint24 _stkAaveToAaveSwapFee
-    ) external onlyVaultManagers {
-        stkAaveToAaveSwapFee = _stkAaveToAaveSwapFee;
+    function setSwapFee(uint24 _aaveToStkAaveSwapFee)
+        external
+        onlyVaultManagers
+    {
+        require(
+            _aaveToStkAaveSwapFee == 500 ||
+                _aaveToStkAaveSwapFee == 3000 ||
+                _aaveToStkAaveSwapFee == 10000
+        );
+        aaveToStkAaveSwapFee = _aaveToStkAaveSwapFee;
+    }
+
+    function setDiscount(uint256 _stkAaveDiscountBps)
+        external
+        onlyVaultManagers
+    {
+        require(stkAaveDiscountBps < MAX_BPS);
+        stkAaveDiscountBps = _stkAaveDiscountBps;
     }
 
     function name() external view override returns (string memory) {
@@ -118,9 +129,6 @@ contract Strategy is BaseStrategy {
             // but it is possible for the strategy to unwind full position
             (amountAvailable, ) = liquidatePosition(amountRequired);
 
-            // Don't do a redundant adjustment in adjustPosition
-            alreadyAdjusted = true;
-
             if (amountAvailable >= amountRequired) {
                 _debtPayment = _debtOutstanding;
                 // profit remains unchanged unless there is not enough to pay it
@@ -152,48 +160,18 @@ contract Strategy is BaseStrategy {
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
-        if (alreadyAdjusted) {
-            alreadyAdjusted = false; // reset for next time
+        uint256 wantBalance = balanceOfWant();
+
+        if (_debtOutstanding >= wantBalance) {
             return;
         }
 
-        uint256 wantBalance = balanceOfWant();
-        // deposit available want as collateral
-        if (
-            wantBalance > _debtOutstanding &&
-            wantBalance.sub(_debtOutstanding) > minWant
-        ) {
-            _depositCollateral(wantBalance.sub(_debtOutstanding));
-            // we update the value
-            wantBalance = balanceOfWant();
-        }
-        // check current position
-        uint256 currentCollatRatio = getCurrentCollatRatio();
+        uint256 amountToSwap = wantBalance.sub(_debtOutstanding);
+        uint256 amountToReceive =
+            amountToSwap.mul(MAX_BPS.sub(stkAaveDiscountBps)).div(MAX_BPS);
+        _swapAaveForStkAave(amountToSwap, amountToReceive);
 
-        // Either we need to free some funds OR we want to be max levered
-        if (_debtOutstanding > wantBalance) {
-            // we should free funds
-            uint256 amountRequired = _debtOutstanding.sub(wantBalance);
-
-            // NOTE: vault will take free funds during the next harvest
-            _freeFunds(amountRequired);
-        } else if (currentCollatRatio < targetCollatRatio) {
-            // we should lever up
-            if (targetCollatRatio.sub(currentCollatRatio) > minRatio) {
-                // we only act on relevant differences
-                _leverMax();
-            }
-        } else if (currentCollatRatio > targetCollatRatio) {
-            if (currentCollatRatio.sub(targetCollatRatio) > minRatio) {
-                (uint256 deposits, uint256 borrows) = getCurrentPosition();
-                uint256 newBorrow =
-                    getBorrowFromSupply(
-                        deposits.sub(borrows),
-                        targetCollatRatio
-                    );
-                _leverDownTo(newBorrow, borrows);
-            }
-        }
+        _startCooldown();
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -201,25 +179,8 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
-        // NOTE: Maintain invariant `want.balanceOf(this) >= _liquidatedAmount`
-        // NOTE: Maintain invariant `_liquidatedAmount + _loss <= _amountNeeded`
-        uint256 wantBalance = balanceOfWant();
-        if (wantBalance > _amountNeeded) {
-            // if there is enough free want, let's use it
-            return (_amountNeeded, 0);
-        }
-
-        // we need to free funds
-        uint256 amountRequired = _amountNeeded.sub(wantBalance);
-        _freeFunds(amountRequired);
-
         uint256 freeAssets = balanceOfWant();
-        if (_amountNeeded > freeAssets) {
-            _liquidatedAmount = freeAssets;
-            _loss = _amountNeeded.sub(freeAssets);
-        } else {
-            _liquidatedAmount = _amountNeeded;
-        }
+        _liquidatedAmount = freeAssets;
     }
 
     function liquidateAllPositions()
@@ -240,9 +201,10 @@ contract Strategy is BaseStrategy {
         override
         returns (address[] memory)
     {}
+
     // INTERNAL ACTIONS
 
-    function _claimRewards() internal returns (uint256) {
+    function _claimRewards() internal {
         uint256 stkAaveBalance = balanceOfStkAave();
         CooldownStatus cooldownStatus;
         if (stkAaveBalance > 0) {
@@ -257,15 +219,13 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function _startCooldown() internal returns (uint256) {
+    function _startCooldown() internal {
         uint256 stkAaveBalance = balanceOfStkAave();
         if (stkAaveBalance == 0) return;
 
         CooldownStatus cooldownStatus = _checkCooldown();
 
-        if (
-            cooldownStatus == CooldownStatus.None
-        ) {
+        if (cooldownStatus == CooldownStatus.None) {
             stkAave.cooldown();
         }
     }
@@ -289,11 +249,8 @@ contract Strategy is BaseStrategy {
             return amount;
         }
 
-        // KISS: just use a v2 router for quotes which aren't used in critical logic
-        IUni router =
-            swapRouter == SwapRouter.SushiV2 ? SUSHI_V2_ROUTER : UNI_V2_ROUTER;
         uint256[] memory amounts =
-            router.getAmountsOut(
+            SUSHI_V2_ROUTER.getAmountsOut(
                 amount,
                 getTokenOutPathV2(token, address(want))
             );
@@ -350,36 +307,14 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function getTokenOutPathV3(address _token_in, address _token_out)
-        internal
-        view
-        returns (bytes memory _path)
-    {
-        if (_token_out == weth) {
-            _path = abi.encodePacked(
-                address(_token_in),
-                aaveToWethSwapFee,
-                address(weth)
-            );
-        } else {
-            _path = abi.encodePacked(
-                address(_token_in),
-                aaveToWethSwapFee,
-                address(weth),
-                wethToWantSwapFee,
-                address(_token_out)
-            );
-        }
-    }
-
-    function _sellSTKAAVEToAAVE(uint256 amountIn, uint256 minOut) internal {
+    function _swapAaveForStkAave(uint256 amountIn, uint256 minOut) internal {
         // Swap Rewards in UNIV3
         // NOTE: Unoptimized, can be frontrun and most importantly this pool is low liquidity
         UNI_V3_ROUTER.exactInputSingle(
             ISwapRouter.ExactInputSingleParams(
-                address(stkAave),
                 address(aave),
-                stkAaveToAaveSwapFee,
+                address(stkAave),
+                aaveToStkAaveSwapFee,
                 address(this),
                 now,
                 amountIn, // wei

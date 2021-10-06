@@ -6,7 +6,9 @@ pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
 // These are the core Yearn libraries
-import {BaseStrategy} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
+import {
+    BaseStrategyInitializable
+} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
 
 import {
     SafeERC20,
@@ -22,7 +24,7 @@ import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
 
 import "../interfaces/aave/IStakedAave.sol";
 
-contract Strategy is BaseStrategy {
+contract Strategy is BaseStrategyInitializable {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -47,11 +49,21 @@ contract Strategy is BaseStrategy {
 
     // OPS State Variables
     uint24 public aaveToStkAaveSwapFee = 10000;
-    uint256 private stkAaveDiscountBps = 350;
+    uint256 private stkAaveDiscountBps = 150;
 
     uint256 private constant MAX_BPS = 1e4;
 
-    constructor(address _vault) public BaseStrategy(_vault) {
+    constructor(address _vault) public BaseStrategyInitializable(_vault) {
+        _initializeThis();
+    }
+
+    function initialize(
+        address _vault,
+        address _strategist,
+        address _rewards,
+        address _keeper
+    ) external override {
+        _initialize(_vault, _strategist, _rewards, _keeper);
         _initializeThis();
     }
 
@@ -109,7 +121,7 @@ contract Strategy is BaseStrategy {
         // account for profit / losses
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
 
-        uint256 totalAssets = balanceOfWant();
+        uint256 totalAssets = estimatedTotalAssets();
 
         if (totalDebt > totalAssets) {
             // we have losses

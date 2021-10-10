@@ -12,8 +12,6 @@ def vault_status(vault):
 
 def strategy_status(vault, strategy):
     status = vault.strategies(strategy).dict()
-    (lend, borrow) = strategy.getCurrentPosition()
-    ratio = strategy.getCurrentCollatRatio()
     print(f"--- Strategy {strategy.name()} ---")
     print(f"Performance fee {status['performanceFee']}")
     print(f"Debt Ratio {status['debtRatio']}")
@@ -22,16 +20,8 @@ def strategy_status(vault, strategy):
     print(f"Total Loss {to_units(vault, status['totalLoss'])}")
     print(f"Estimated Total Assets {to_units(vault, strategy.estimatedTotalAssets())}")
     print(
-        f"Estimated Total Rewards {to_units(vault, strategy.estimatedRewardsInWant())}"
-    )
-    print(
         f"Loose Want {to_units(vault, Contract(strategy.want()).balanceOf(strategy))}"
     )
-    print(f"Current Lend {to_units(vault, lend)}")
-    print(f"Current Borrow {to_units(vault, borrow)}")
-    print(f"Current LTV Ratio {ratio/1e18:.4f}")
-    print(f"Target LTV Ratio {strategy.targetCollatRatio()/1e18:.4f}")
-    print(f"Max LTV Ratio {strategy.maxCollatRatio()/1e18:.4f}")
 
 
 def to_units(token, amount):

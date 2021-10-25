@@ -64,7 +64,7 @@ contract Strategy is BaseStrategyInitializable {
     function _initializeThis() internal {
         require(address(want) == address(aave));
 
-        aaveToStkAaveSwapFee = 10000;
+        aaveToStkAaveSwapFee = 3000;
         stkAaveDiscountBps = 350;
 
         // approve swap router spend

@@ -2,7 +2,7 @@ from utils import actions, checks, utils
 import pytest
 
 
-def test_airdrop(
+def test_airdrop_want(
     chain,
     accounts,
     token,

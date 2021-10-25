@@ -2,7 +2,7 @@ import pytest
 from utils import actions, utils
 
 
-def test_clone(
+def xtest_clone(
     vault,
     strategy,
     token,

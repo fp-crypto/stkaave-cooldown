@@ -130,11 +130,6 @@ contract Strategy is BaseStrategyInitializable {
         uint256 amountRequired = _debtOutstanding.add(_profit);
 
         if (amountRequired > amountAvailable) {
-            // we need to free funds
-            // we dismiss losses here, they cannot be generated from withdrawal
-            // but it is possible for the strategy to unwind full position
-            (amountAvailable, ) = liquidatePosition(amountRequired);
-
             if (amountAvailable >= amountRequired) {
                 _debtPayment = _debtOutstanding;
                 // profit remains unchanged unless there is not enough to pay it
@@ -180,14 +175,21 @@ contract Strategy is BaseStrategyInitializable {
         _startCooldown();
     }
 
+    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
+        CooldownStatus cooldownStatus = _checkCooldown();
+        return (cooldownStatus == CooldownStatus.Claim) && super.harvestTrigger(callCostInWei);
+    }
+
     function liquidatePosition(uint256 _amountNeeded)
         internal
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
-        // BUG? This is freeing more than the actual amount needed
-        uint256 freeAssets = balanceOfWant();
-        _liquidatedAmount = freeAssets;
+        _liquidatedAmount = balanceOfWant();
+
+        if (_amountNeeded > _liquidatedAmount) {
+            _loss = _amountNeeded.sub(_liquidatedAmount);
+        }
     }
 
     function liquidateAllPositions()
@@ -195,7 +197,7 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (uint256 _amountFreed)
     {
-        (_amountFreed, ) = liquidatePosition(type(uint256).max);
+        _amountFreed = balanceOfWant();
     }
 
     function prepareMigration(address _newStrategy) internal override {

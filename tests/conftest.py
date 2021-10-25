@@ -83,6 +83,11 @@ def stkaave():
     yield Contract("0x4da27a545c0c5B758a6BA100e3a049001de870f5")
 
 
+@pytest.fixture
+def stkaave_whale():
+    yield Contract("0x4a49985B14bD0ce42c25eFde5d8c379a48AB02F3")
+
+
 @pytest.fixture(autouse=True, scope="function")
 def amount(token, token_whale, user):
     # this will get the number of tokens (around $1m worth of token)

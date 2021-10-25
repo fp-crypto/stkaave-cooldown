@@ -63,6 +63,7 @@ def token(request):
     yield Contract(token_addresses[request.param])
 
 
+
 whale_addresses = {
     "AAVE": "0x25F2226B597E8F9514B3F68F00f494cF4f286491",
 }
@@ -144,10 +145,6 @@ def strategy(chain, strategist, keeper, vault, Strategy, gov, weth):
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
 
-    # send WETH to repay 2 wei+ each flashloan
-    weth.transfer(strategy, 1e6, {"from": "0xBA12222222228d8Ba445958a75a0704d566BF2C8"})
-    chain.sleep(1)
-    chain.mine()
     yield strategy
 
 

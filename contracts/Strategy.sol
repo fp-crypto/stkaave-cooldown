@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
-// Feel free to change the license, but this is what we use
-
-// Feel free to change this version of Solidity. We support >=0.6.0 <0.7.0;
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-// These are the core Yearn libraries
 import {
     BaseStrategyInitializable
 } from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
@@ -16,8 +12,6 @@ import {
     IERC20,
     Address
 } from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
-
-import "@openzeppelin/contracts/math/Math.sol";
 
 import "../interfaces/uniswap/IUni.sol";
 import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
@@ -94,7 +88,7 @@ contract Strategy is BaseStrategyInitializable {
         external
         onlyVaultManagers
     {
-        require(stkAaveDiscountBps < MAX_BPS);
+        require(_stkAaveDiscountBps <= MAX_BPS, "< MAX_BPS");
         stkAaveDiscountBps = _stkAaveDiscountBps;
     }
 
@@ -191,6 +185,7 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
+        // BUG? This is freeing more than the actual amount needed
         uint256 freeAssets = balanceOfWant();
         _liquidatedAmount = freeAssets;
     }

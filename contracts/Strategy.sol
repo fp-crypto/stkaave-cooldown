@@ -43,7 +43,8 @@ contract Strategy is BaseStrategyInitializable {
 
     // OPS State Variables
     uint24 public aaveToStkAaveSwapFee = 10000;
-    uint256 private stkAaveDiscountBps = 150;
+    uint256 public stkAaveDiscountBps = 150;
+    bool public forceCooldown = false;
 
     uint256 private constant MAX_BPS = 1e4;
 
@@ -92,12 +93,20 @@ contract Strategy is BaseStrategyInitializable {
         stkAaveDiscountBps = _stkAaveDiscountBps;
     }
 
+    function setForceCooldown(bool _forceCooldown) external onlyVaultManagers {
+        forceCooldown = _forceCooldown;
+    }
+
     function name() external view override returns (string memory) {
         return "StrategyStkAaveCooldown";
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
         return balanceOfWant().add(balanceOfStkAave());
+    }
+
+    function cooldownStatus() public view returns (CooldownStatus) {
+        return _checkCooldown();
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -109,8 +118,8 @@ contract Strategy is BaseStrategyInitializable {
             uint256 _debtPayment
         )
     {
-        // claim rewards
-        _claimRewards();
+        // claim rewards and unstake
+        _claimRewardsAndUnstake();
 
         // account for profit / losses
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
@@ -167,6 +176,14 @@ contract Strategy is BaseStrategyInitializable {
             return;
         }
 
+        if (
+            !forceCooldown &&
+            _checkCooldown() != CooldownStatus.None &&
+            balanceOfStkAave() != 0
+        ) {
+            return;
+        }
+
         uint256 amountToSwap = wantBalance.sub(_debtOutstanding);
         uint256 amountToReceive =
             amountToSwap.mul(MAX_BPS.sub(stkAaveDiscountBps)).div(MAX_BPS);
@@ -217,7 +234,7 @@ contract Strategy is BaseStrategyInitializable {
 
     // INTERNAL ACTIONS
 
-    function _claimRewards() internal {
+    function _claimRewardsAndUnstake() internal {
         uint256 stkAaveBalance = balanceOfStkAave();
         CooldownStatus cooldownStatus;
         if (stkAaveBalance > 0) {
@@ -236,9 +253,7 @@ contract Strategy is BaseStrategyInitializable {
         uint256 stkAaveBalance = balanceOfStkAave();
         if (stkAaveBalance == 0) return;
 
-        CooldownStatus cooldownStatus = _checkCooldown();
-
-        if (cooldownStatus == CooldownStatus.None) {
+        if (forceCooldown || _checkCooldown() == CooldownStatus.None) {
             stkAave.cooldown();
         }
     }

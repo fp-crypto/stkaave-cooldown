@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, Contract, network
+from brownie import chain, config, Contract, network
 
 # Function scoped isolation fixture to enable xdist.
 # Snapshots the chain before each test and reverts after test completion.
@@ -48,20 +48,16 @@ def keeper(accounts):
     yield accounts[5]
 
 
-token_addresses = {
-    "AAVE": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9" #AAVE
-}
+token_addresses = {"AAVE": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9"}  # AAVE
+
 
 @pytest.fixture(
-    params=[
-        "AAVE"
-    ],
+    params=["AAVE"],
     scope="session",
     autouse=True,
 )
 def token(request):
     yield Contract(token_addresses[request.param])
-
 
 
 whale_addresses = {
@@ -78,6 +74,7 @@ token_prices = {
     "AAVE": 300,
 }
 
+
 @pytest.fixture
 def stkaave():
     yield Contract("0x4da27a545c0c5B758a6BA100e3a049001de870f5")
@@ -89,8 +86,26 @@ def stkaave_whale():
 
 
 @pytest.fixture(autouse=True, scope="function")
+def create_discount(token, stkaave, stkaave_whale, strategy, amount):
+    v3_router = Contract("0xE592427A0AEce92De3Edee1F18E0157C05861564")
+    stkaave.approve(v3_router, 2 ** 256 - 1, {"from": stkaave_whale})
+    yield v3_router.exactInputSingle(
+        (
+            stkaave,
+            token,
+            strategy.aaveToStkAaveSwapFee(),
+            stkaave_whale,
+            chain.time() + 3600,
+            amount * 5,
+            0,
+            0,
+        ),
+        {"from": stkaave_whale},
+    )
+
+
+@pytest.fixture(autouse=True, scope="function")
 def amount(token, token_whale, user):
-    # this will get the number of tokens (around $1m worth of token)
     base_amount = round(15_000 / token_prices[token.symbol()])
     amount = base_amount * 10 ** token.decimals()
     # In order to get some funds for the token you are about to use,
@@ -99,19 +114,6 @@ def amount(token, token_whale, user):
         amount = token.balanceOf(token_whale)
     token.transfer(user, amount, {"from": token_whale})
     yield amount
-
-
-@pytest.fixture(scope="function")
-def big_amount(token, token_whale, user):
-    # this will get the number of tokens (around $49m worth of token)
-    fifty_minus_one_million = round(49_000_000 / token_prices[token.symbol()])
-    amount = fifty_minus_one_million * 10 ** token.decimals()
-    # In order to get some funds for the token you are about to use,
-    # it impersonate a whale address
-    if amount > token.balanceOf(token_whale):
-        amount = token.balanceOf(token_whale)
-    token.transfer(user, amount, {"from": token_whale})
-    yield token.balanceOf(user)
 
 
 @pytest.fixture
@@ -153,6 +155,9 @@ def strategy(chain, strategist, keeper, vault, Strategy, gov, weth):
     strategy = strategist.deploy(Strategy, vault)
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
+
+    chain.sleep(1)
+    chain.mine()
 
     yield strategy
 

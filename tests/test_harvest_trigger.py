@@ -2,15 +2,8 @@ from brownie import Wei, chain
 import pytest
 
 
-def test_harvest_trigger(
-    vault,
-    strategy,
-    token,
-    stkaave,
-    token_whale,
-    management
-):
-    token.approve(vault, 2**256-1, {"from": token_whale})
+def test_harvest_trigger(vault, strategy, token, stkaave, token_whale, management):
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(Wei("10 ether"), {"from": token_whale})
     strategy.harvest({"from": management})
 

@@ -22,6 +22,9 @@ def strategy_status(vault, strategy):
     print(
         f"Loose Want {to_units(vault, Contract(strategy.want()).balanceOf(strategy))}"
     )
+    print(
+        f"StkAave Balance {to_units(vault, Contract('0x4da27a545c0c5B758a6BA100e3a049001de870f5').balanceOf(strategy))}"
+    )
 
 
 def to_units(token, amount):

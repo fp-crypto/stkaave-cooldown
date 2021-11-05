@@ -175,9 +175,16 @@ contract Strategy is BaseStrategyInitializable {
         _startCooldown();
     }
 
-    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
+    function harvestTrigger(uint256 callCostInWei)
+        public
+        view
+        override
+        returns (bool)
+    {
         CooldownStatus cooldownStatus = _checkCooldown();
-        return (cooldownStatus == CooldownStatus.Claim) && super.harvestTrigger(callCostInWei);
+        return
+            (cooldownStatus == CooldownStatus.Claim) &&
+            super.harvestTrigger(callCostInWei);
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -186,10 +193,7 @@ contract Strategy is BaseStrategyInitializable {
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
         _liquidatedAmount = balanceOfWant();
-
-        if (_amountNeeded > _liquidatedAmount) {
-            _loss = _amountNeeded.sub(_liquidatedAmount);
-        }
+        // no losses on withdraw
     }
 
     function liquidateAllPositions()

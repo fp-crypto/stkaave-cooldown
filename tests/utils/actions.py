@@ -18,9 +18,7 @@ def generate_profit(strategy, token_whale, amount):
 def generate_loss(strategy, amount):
     strategy_account = accounts.at(strategy, force=True)
     stkAave = interface.IERC20("0x4da27a545c0c5B758a6BA100e3a049001de870f5")
-    stkAave.transfer(
-        stkAave, amount, {"from": strategy_account}
-    )
+    stkAave.transfer(stkAave, amount, {"from": strategy_account})
     return
 
 

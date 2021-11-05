@@ -3,15 +3,9 @@ import pytest
 
 
 def test_airdrop_stkaave(
-    vault,
-    strategy,
-    token,
-    stkaave,
-    token_whale,
-    stkaave_whale,
-    management
+    vault, strategy, token, stkaave, token_whale, stkaave_whale, management
 ):
-    token.approve(vault, 2**256-1, {"from": token_whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": token_whale})
     vault.deposit(Wei("10 ether"), {"from": token_whale})
     strategy.harvest({"from": management})
 
@@ -25,7 +19,7 @@ def test_airdrop_stkaave(
 
     # Sending staked aave pushes the cooldown
     stake_balance = stkaave.balanceOf(strategy)
-    stkaave.transfer(strategy, stake_balance * .1, {"from": stkaave_whale})
+    stkaave.transfer(strategy, stake_balance * 0.1, {"from": stkaave_whale})
     assert strategy.harvestTrigger(1) == False
 
     # Sleep for one more day since we sent 10%

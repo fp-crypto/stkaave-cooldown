@@ -14,7 +14,7 @@ def xtest_clone(
     user,
     RELATIVE_APPROX,
     Strategy,
-    chain
+    chain,
 ):
     user_balance_before = token.balanceOf(user)
     actions.user_deposit(user, vault, token, amount)

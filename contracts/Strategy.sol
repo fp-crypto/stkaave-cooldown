@@ -92,7 +92,7 @@ contract Strategy is BaseStrategyInitializable {
         external
         onlyVaultManagers
     {
-        require(_stkAaveDiscountBps <= MAX_BPS, "< MAX_BPS");
+        require(_stkAaveDiscountBps <= MAX_BPS); // dev: >MAX_BPS
         stkAaveDiscountBps = _stkAaveDiscountBps;
     }
 

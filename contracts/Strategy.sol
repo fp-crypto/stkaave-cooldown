@@ -2,16 +2,11 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-import {
-    BaseStrategyInitializable
-} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
+import {BaseStrategyInitializable} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
 
-import {
-    SafeERC20,
-    SafeMath,
-    IERC20,
-    Address
-} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import {SafeERC20, SafeMath, IERC20, Address} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+
+import "@openzeppelin/contracts/math/Math.sol";
 
 import {IUniswapV2Router} from "../interfaces/uniswap/IUniswapV2Router.sol";
 import {IUniswapV3Router} from "../interfaces/uniswap/IUniswapV3Router.sol";
@@ -33,7 +28,11 @@ contract Strategy is BaseStrategyInitializable {
     // 0 = no cooldown or past withdraw period
     // 1 = claim period
     // 2 = cooldown initiated, future claim period
-    enum CooldownStatus {None, Initiated, Claim}
+    enum CooldownStatus {
+        None,
+        Initiated,
+        Claim
+    }
 
     // SWAP routers
     IUniswapV2Router private constant SUSHI_V2_ROUTER =
@@ -180,20 +179,21 @@ contract Strategy is BaseStrategyInitializable {
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
-        uint256 wantBalance = balanceOfWant();
-
         if (
             !forceCooldown &&
             _checkCooldown() != CooldownStatus.None &&
-            balanceOfStkAave() <= dustThreshold
+            balanceOfStkAave() > dustThreshold
         ) {
             return;
         }
 
+        uint256 wantBalance = balanceOfWant();
+
         if (wantBalance > _debtOutstanding && wantBalance > dustThreshold) {
             uint256 amountToSwap = wantBalance.sub(_debtOutstanding);
-            uint256 amountToReceive =
-                amountToSwap.mul(MAX_BPS.sub(stkAaveDiscountBps)).div(MAX_BPS);
+            uint256 amountToReceive = amountToSwap
+                .mul(MAX_BPS.sub(stkAaveDiscountBps))
+                .div(MAX_BPS);
             _swapAaveForStkAave(amountToSwap, amountToReceive);
         }
 
@@ -207,9 +207,13 @@ contract Strategy is BaseStrategyInitializable {
         returns (bool)
     {
         CooldownStatus _cooldownStatus = _checkCooldown();
+        uint256 _balanceOfStkAave = balanceOfStkAave();
         return
-            (_cooldownStatus == CooldownStatus.Claim) ||
-            super.harvestTrigger(callCostInWei);
+            (_cooldownStatus == CooldownStatus.Claim &&
+                _balanceOfStkAave > dustThreshold) ||
+            ((_cooldownStatus == CooldownStatus.None ||
+                _balanceOfStkAave <= dustThreshold) &&
+                super.harvestTrigger(callCostInWei));
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -217,8 +221,14 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
-        _liquidatedAmount = balanceOfWant();
-        // no losses on withdraw
+        _liquidatedAmount = Math.min(balanceOfWant(), _amountNeeded);
+        if (_amountNeeded > _liquidatedAmount) {
+            uint256 diff = _amountNeeded.sub(_liquidatedAmount);
+            // no loss on withdraw unless dust sized
+            if (diff <= dustThreshold) {
+                _loss = diff;
+            }
+        }
     }
 
     function liquidateAllPositions()
@@ -285,11 +295,10 @@ contract Strategy is BaseStrategyInitializable {
             return amount;
         }
 
-        uint256[] memory amounts =
-            SUSHI_V2_ROUTER.getAmountsOut(
-                amount,
-                getTokenOutPathV2(token, address(want))
-            );
+        uint256[] memory amounts = SUSHI_V2_ROUTER.getAmountsOut(
+            amount,
+            getTokenOutPathV2(token, address(want))
+        );
 
         return amounts[amounts.length - 1];
     }
@@ -304,12 +313,14 @@ contract Strategy is BaseStrategyInitializable {
     }
 
     function _checkCooldown() internal view returns (CooldownStatus) {
-        uint256 cooldownStartTimestamp =
-            IStakedAave(stkAave).stakersCooldowns(address(this));
+        uint256 cooldownStartTimestamp = IStakedAave(stkAave).stakersCooldowns(
+            address(this)
+        );
         uint256 COOLDOWN_SECONDS = IStakedAave(stkAave).COOLDOWN_SECONDS();
         uint256 UNSTAKE_WINDOW = IStakedAave(stkAave).UNSTAKE_WINDOW();
-        uint256 nextClaimStartTimestamp =
-            cooldownStartTimestamp.add(COOLDOWN_SECONDS);
+        uint256 nextClaimStartTimestamp = cooldownStartTimestamp.add(
+            COOLDOWN_SECONDS
+        );
 
         if (cooldownStartTimestamp == 0) {
             return CooldownStatus.None;
@@ -330,8 +341,8 @@ contract Strategy is BaseStrategyInitializable {
         pure
         returns (address[] memory _path)
     {
-        bool is_weth =
-            _token_in == address(weth) || _token_out == address(weth);
+        bool is_weth = _token_in == address(weth) ||
+            _token_out == address(weth);
         _path = new address[](is_weth ? 2 : 3);
         _path[0] = _token_in;
 

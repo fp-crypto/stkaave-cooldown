@@ -61,8 +61,46 @@ def test_apr(
     )
 
 
+def test_withdraw(
+    chain, gov, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
+):
+    # Deposit to the vault
+    user_balance_before = token.balanceOf(user)
+    actions.user_deposit(user, vault, token, amount)
+
+    vault.updateStrategyDebtRatio(strategy, 5000, {"from": gov})
+
+    # harvest
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
+    assert strategy.estimatedTotalAssets() >= amount * 0.5
+    utils.strategy_status(vault, strategy)
+
+    vault.updateStrategyDebtRatio(strategy, 10000, {"from": gov})
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
+    assert strategy.estimatedTotalAssets() >= amount
+    utils.strategy_status(vault, strategy)
+
+    vault.withdraw({"from": user})
+    assert (
+        pytest.approx(token.balanceOf(user), rel=RELATIVE_APPROX)
+        == user_balance_before * 0.5
+    )
+    utils.strategy_status(vault, strategy)
+
+    utils.sleep(10 * 24 * 3600 + 1)
+    vault.revokeStrategy(strategy.address, {"from": gov})
+    strategy.harvest({"from": strategist})
+    utils.strategy_status(vault, strategy)
+
+    # withdrawal
+    vault.withdraw({"from": user})
+    assert token.balanceOf(user) > user_balance_before
+
+
 def test_harvest_after_long_idle_period(
-    chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
+    chain, token, vault, strategy, user, strategist, amount
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)

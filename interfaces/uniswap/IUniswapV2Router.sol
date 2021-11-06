@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.6.12;
 
-interface IUni{
+interface IUniswapV2Router{
     function getAmountsOut(
         uint256 amountIn,
         address[] calldata path

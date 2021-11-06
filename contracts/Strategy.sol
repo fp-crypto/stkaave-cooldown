@@ -13,8 +13,8 @@ import {
     Address
 } from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import "../interfaces/uniswap/IUni.sol";
-import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
+import {IUniswapV2Router} from "../interfaces/uniswap/IUniswapV2Router.sol";
+import {IUniswapV3Router} from "../interfaces/uniswap/IUniswapV3Router.sol";
 
 import "../interfaces/aave/IStakedAave.sol";
 
@@ -36,10 +36,10 @@ contract Strategy is BaseStrategyInitializable {
     enum CooldownStatus {None, Initiated, Claim}
 
     // SWAP routers
-    IUni private constant SUSHI_V2_ROUTER =
-        IUni(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
-    ISwapRouter private constant UNI_V3_ROUTER =
-        ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+    IUniswapV2Router private constant SUSHI_V2_ROUTER =
+        IUniswapV2Router(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    IUniswapV3Router private constant UNI_V3_ROUTER =
+        IUniswapV3Router(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
     // OPS State Variables
     uint24 public aaveToStkAaveSwapFee;
@@ -206,9 +206,9 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (bool)
     {
-        CooldownStatus cooldownStatus = _checkCooldown();
+        CooldownStatus _cooldownStatus = _checkCooldown();
         return
-            (cooldownStatus == CooldownStatus.Claim) &&
+            (_cooldownStatus == CooldownStatus.Claim) &&
             super.harvestTrigger(callCostInWei);
     }
 
@@ -244,13 +244,13 @@ contract Strategy is BaseStrategyInitializable {
 
     function _claimRewardsAndUnstake() internal {
         uint256 stkAaveBalance = balanceOfStkAave();
-        CooldownStatus cooldownStatus;
+        CooldownStatus _cooldownStatus;
         if (stkAaveBalance > 0) {
-            cooldownStatus = _checkCooldown(); // don't check status if we have no stkAave
+            _cooldownStatus = _checkCooldown(); // don't check status if we have no stkAave
         }
 
         // If it's the claim period claim
-        if (stkAaveBalance > 0 && cooldownStatus == CooldownStatus.Claim) {
+        if (stkAaveBalance > 0 && _cooldownStatus == CooldownStatus.Claim) {
             // redeem AAVE from stkAave
             stkAave.claimRewards(address(this), type(uint256).max);
             stkAave.redeem(address(this), stkAaveBalance);
@@ -347,7 +347,7 @@ contract Strategy is BaseStrategyInitializable {
         // Swap Rewards in UNIV3
         // NOTE: Unoptimized, can be frontrun and most importantly this pool is low liquidity
         UNI_V3_ROUTER.exactInputSingle(
-            ISwapRouter.ExactInputSingleParams(
+            IUniswapV3Router.ExactInputSingleParams(
                 address(aave),
                 address(stkAave),
                 aaveToStkAaveSwapFee,

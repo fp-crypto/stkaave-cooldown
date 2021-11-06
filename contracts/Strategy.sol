@@ -26,8 +26,8 @@ contract Strategy is BaseStrategyInitializable {
 
     // represents stkAave cooldown status
     // 0 = no cooldown or past withdraw period
-    // 1 = claim period
-    // 2 = cooldown initiated, future claim period
+    // 1 = cooldown initiated, future claim period
+    // 2 = claim period
     enum CooldownStatus {
         None,
         Initiated,

@@ -208,7 +208,7 @@ contract Strategy is BaseStrategyInitializable {
     {
         CooldownStatus _cooldownStatus = _checkCooldown();
         return
-            (_cooldownStatus == CooldownStatus.Claim) &&
+            (_cooldownStatus == CooldownStatus.Claim) ||
             super.harvestTrigger(callCostInWei);
     }
 

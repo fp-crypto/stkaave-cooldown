@@ -62,7 +62,7 @@ def test_apr(
 
 
 def test_harvest_after_long_idle_period(
-    chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
+    chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -76,9 +76,12 @@ def test_harvest_after_long_idle_period(
 
     utils.sleep(26 * 7 * 24 * 3600)
     utils.strategy_status(vault, strategy)
-
     strategy.harvest({"from": strategist})
+    utils.strategy_status(vault, strategy)
 
+    utils.sleep((10 * 24 * 3600) + 1)
+    utils.strategy_status(vault, strategy)
+    strategy.harvest({"from": strategist})
     utils.strategy_status(vault, strategy)
 
 

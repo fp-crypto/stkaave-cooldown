@@ -33,7 +33,7 @@ contract Strategy is BaseStrategyInitializable {
     // 0 = no cooldown or past withdraw period
     // 1 = claim period
     // 2 = cooldown initiated, future claim period
-    enum CooldownStatus {None, Claim, Initiated}
+    enum CooldownStatus {None, Initiated, Claim}
 
     // SWAP routers
     IUni private constant SUSHI_V2_ROUTER =
@@ -42,9 +42,10 @@ contract Strategy is BaseStrategyInitializable {
         ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
     // OPS State Variables
-    uint24 public aaveToStkAaveSwapFee = 10000;
-    uint256 public stkAaveDiscountBps = 150;
-    bool public forceCooldown = false;
+    uint24 public aaveToStkAaveSwapFee;
+    uint256 public stkAaveDiscountBps;
+    bool public forceCooldown;
+    uint256 public dustThreshold;
 
     uint256 private constant MAX_BPS = 1e4;
 
@@ -66,7 +67,9 @@ contract Strategy is BaseStrategyInitializable {
         require(address(want) == address(aave));
 
         aaveToStkAaveSwapFee = 3000;
-        stkAaveDiscountBps = 350;
+        stkAaveDiscountBps = 150;
+        forceCooldown = false;
+        dustThreshold = 1e13;
 
         // approve swap router spend
         approveMaxSpend(address(stkAave), address(UNI_V3_ROUTER));
@@ -97,8 +100,15 @@ contract Strategy is BaseStrategyInitializable {
         forceCooldown = _forceCooldown;
     }
 
+    function setDustThreshold(uint256 _dustThreshold)
+        external
+        onlyVaultManagers
+    {
+        dustThreshold = _dustThreshold;
+    }
+
     function name() external view override returns (string memory) {
-        return "StrategyStkAaveCooldown";
+        return "StkAaveCooldownStrategy";
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
@@ -172,22 +182,20 @@ contract Strategy is BaseStrategyInitializable {
     function adjustPosition(uint256 _debtOutstanding) internal override {
         uint256 wantBalance = balanceOfWant();
 
-        if (_debtOutstanding >= wantBalance) {
-            return;
-        }
-
         if (
             !forceCooldown &&
             _checkCooldown() != CooldownStatus.None &&
-            balanceOfStkAave() != 0
+            balanceOfStkAave() <= dustThreshold
         ) {
             return;
         }
 
-        uint256 amountToSwap = wantBalance.sub(_debtOutstanding);
-        uint256 amountToReceive =
-            amountToSwap.mul(MAX_BPS.sub(stkAaveDiscountBps)).div(MAX_BPS);
-        _swapAaveForStkAave(amountToSwap, amountToReceive);
+        if (wantBalance > _debtOutstanding && wantBalance > dustThreshold) {
+            uint256 amountToSwap = wantBalance.sub(_debtOutstanding);
+            uint256 amountToReceive =
+                amountToSwap.mul(MAX_BPS.sub(stkAaveDiscountBps)).div(MAX_BPS);
+            _swapAaveForStkAave(amountToSwap, amountToReceive);
+        }
 
         _startCooldown();
     }

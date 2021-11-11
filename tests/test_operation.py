@@ -124,19 +124,32 @@ def test_harvest_after_long_idle_period(
 
 
 def test_emergency_exit(
-    chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
+    chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
     chain.sleep(1)
     strategy.harvest({"from": strategist})
     strategy.estimatedTotalAssets() >= amount
+    utils.strategy_status(vault, strategy)
 
     # set emergency and exit
     strategy.setEmergencyExit()
     chain.sleep(1)
-    strategy.harvest({"from": strategist})
-    # assert strategy.estimatedTotalAssets() < amount
+    tx = strategy.harvest({"from": strategist})
+    assert strategy.estimatedTotalAssets() < amount
+    utils.strategy_status(vault, strategy)
+
+    swap_fee_percent = strategy.aaveToStkAaveSwapFee() / 1e6
+    loss = tx.events["Harvested"]["loss"]
+
+    assert (
+        pytest.approx(loss, rel=RELATIVE_APPROX) == amount * swap_fee_percent * 2
+    ) or loss < amount * swap_fee_percent * 2  # loss should be the cost of two swaps
+
+    # withdrawal
+    vault.withdraw({"from": user})
+    assert token.balanceOf(user) > amount * ((1 - swap_fee_percent) ** 2)
 
 
 @pytest.mark.parametrize(

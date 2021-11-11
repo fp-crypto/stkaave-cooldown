@@ -112,7 +112,7 @@ contract Strategy is BaseStrategyInitializable {
 
     function estimatedTotalAssets() public view override returns (uint256) {
         uint256 discountedStkAave = MAX_BPS
-            .sub(150)
+            .sub(stkAaveDiscountBps)
             .mul(balanceOfStkAave())
             .div(MAX_BPS);
         return balanceOfWant().add(discountedStkAave);
@@ -231,6 +231,10 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (uint256 _amountFreed)
     {
+        uint256 _balanceOfStkAave = balanceOfStkAave();
+        if (_balanceOfStkAave > dustThreshold) {
+            _swapStkAaveForAave(_balanceOfStkAave, 0); // This is likely lossy
+        }
         _amountFreed = balanceOfWant();
     }
 
@@ -350,16 +354,40 @@ contract Strategy is BaseStrategyInitializable {
     }
 
     function _swapAaveForStkAave(uint256 amountIn, uint256 minOut) internal {
-        // Swap Rewards in UNIV3
-        // NOTE: Unoptimized, can be frontrun and most importantly this pool is low liquidity
+        _swapExactTokenForToken(
+            address(aave),
+            address(stkAave),
+            aaveToStkAaveSwapFee,
+            amountIn,
+            minOut
+        );
+    }
+
+    function _swapStkAaveForAave(uint256 amountIn, uint256 minOut) internal {
+        _swapExactTokenForToken(
+            address(stkAave),
+            address(aave),
+            aaveToStkAaveSwapFee,
+            amountIn,
+            minOut
+        );
+    }
+
+    function _swapExactTokenForToken(
+        address tokenIn,
+        address tokenOut,
+        uint24 swapFee,
+        uint256 amountIn,
+        uint256 minOut
+    ) internal {
         UNI_V3_ROUTER.exactInputSingle(
             IUniswapV3Router.ExactInputSingleParams(
-                address(aave),
-                address(stkAave),
-                aaveToStkAaveSwapFee,
+                tokenIn,
+                tokenOut,
+                swapFee,
                 address(this),
                 now,
-                amountIn, // wei
+                amountIn,
                 minOut,
                 0
             )

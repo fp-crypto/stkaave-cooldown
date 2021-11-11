@@ -266,7 +266,7 @@ contract Strategy is BaseStrategyInitializable {
         uint256 stkAaveBalance = balanceOfStkAave();
         if (stkAaveBalance == 0) return;
 
-        if (forceCooldown || _checkCooldown() == CooldownStatus.None) {
+        if (_checkCooldown() == CooldownStatus.None || forceCooldown) {
             stkAave.cooldown();
         }
     }

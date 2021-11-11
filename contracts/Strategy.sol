@@ -107,11 +107,15 @@ contract Strategy is BaseStrategyInitializable {
     }
 
     function name() external view override returns (string memory) {
-        return "StkAaveCooldownStrategy";
+        return "StrategyStkAaveCooldown";
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
-        return balanceOfWant().add(balanceOfStkAave());
+        uint256 discountedStkAave = MAX_BPS
+            .sub(150)
+            .mul(balanceOfStkAave())
+            .div(MAX_BPS);
+        return balanceOfWant().add(discountedStkAave);
     }
 
     function cooldownStatus() public view returns (CooldownStatus) {
@@ -148,26 +152,18 @@ contract Strategy is BaseStrategyInitializable {
         uint256 amountRequired = _debtOutstanding.add(_profit);
 
         if (amountRequired > amountAvailable) {
-            if (amountAvailable >= amountRequired) {
-                _debtPayment = _debtOutstanding;
-                // profit remains unchanged unless there is not enough to pay it
-                if (amountRequired.sub(_debtPayment) < _profit) {
-                    _profit = amountRequired.sub(_debtPayment);
-                }
+            // we were not able to free enough funds
+            if (amountAvailable < _debtOutstanding) {
+                // available funds are lower than the repayment that we need to do
+                _profit = 0;
+                _debtPayment = amountAvailable;
+                // we dont report losses here as the strategy might not be able to return in this harvest
+                // but it will still be there for the next harvest
             } else {
-                // we were not able to free enough funds
-                if (amountAvailable < _debtOutstanding) {
-                    // available funds are lower than the repayment that we need to do
-                    _profit = 0;
-                    _debtPayment = amountAvailable;
-                    // we dont report losses here as the strategy might not be able to return in this harvest
-                    // but it will still be there for the next harvest
-                } else {
-                    // NOTE: amountRequired is always equal or greater than _debtOutstanding
-                    // important to use amountRequired just in case amountAvailable is > amountAvailable
-                    _debtPayment = _debtOutstanding;
-                    _profit = amountAvailable.sub(_debtPayment);
-                }
+                // NOTE: amountRequired is always equal or greater than _debtOutstanding
+                // important to use amountRequired just in case amountAvailable is > amountAvailable
+                _debtPayment = _debtOutstanding;
+                _profit = amountAvailable.sub(_debtPayment);
             }
         } else {
             _debtPayment = _debtOutstanding;
@@ -180,9 +176,9 @@ contract Strategy is BaseStrategyInitializable {
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
         if (
-            !forceCooldown &&
             _checkCooldown() != CooldownStatus.None &&
-            balanceOfStkAave() > dustThreshold
+            balanceOfStkAave() > dustThreshold &&
+            !forceCooldown
         ) {
             return;
         }
@@ -209,10 +205,9 @@ contract Strategy is BaseStrategyInitializable {
         CooldownStatus _cooldownStatus = _checkCooldown();
         uint256 _balanceOfStkAave = balanceOfStkAave();
         return
-            (_cooldownStatus == CooldownStatus.Claim &&
+            (_cooldownStatus != CooldownStatus.Initiated &&
                 _balanceOfStkAave > dustThreshold) ||
-            ((_cooldownStatus == CooldownStatus.None ||
-                _balanceOfStkAave <= dustThreshold) &&
+            (_cooldownStatus == CooldownStatus.None &&
                 super.harvestTrigger(callCostInWei));
     }
 
@@ -260,7 +255,7 @@ contract Strategy is BaseStrategyInitializable {
         }
 
         // If it's the claim period claim
-        if (stkAaveBalance > 0 && _cooldownStatus == CooldownStatus.Claim) {
+        if (_cooldownStatus == CooldownStatus.Claim) {
             // redeem AAVE from stkAave
             stkAave.claimRewards(address(this), type(uint256).max);
             stkAave.redeem(address(this), stkAaveBalance);

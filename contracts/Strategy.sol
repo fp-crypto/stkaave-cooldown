@@ -131,7 +131,7 @@ contract Strategy is BaseStrategyInitializable {
         uint256 discountedStkAave = MAX_BPS
             .sub(stkAaveDiscountBps)
             .mul(balanceOfStkAave())
-            .div(MAX_BPS);
+            .div(MAX_BPS); // discount stkAave based on the minimum discount bps
         return balanceOfWant().add(discountedStkAave);
     }
 

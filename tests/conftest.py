@@ -1,5 +1,5 @@
 import pytest
-from brownie import chain, config, Contract, network
+from brownie import chain, config, Contract, network, Wei
 
 # Function scoped isolation fixture to enable xdist.
 # Snapshots the chain before each test and reverts after test completion.
@@ -154,6 +154,7 @@ def live_vault(registry, token):
 def strategy(chain, strategist, keeper, vault, Strategy, gov, weth):
     strategy = strategist.deploy(Strategy, vault)
     strategy.setKeeper(keeper)
+    strategy.setMaxAcceptableBaseFee(Wei("1000 gwei"), {"from": gov})
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
 
     chain.sleep(1)

@@ -13,6 +13,10 @@ import {IUniswapV3Router} from "../interfaces/uniswap/IUniswapV3Router.sol";
 
 import "../interfaces/aave/IStakedAave.sol";
 
+interface IBaseFee {
+    function basefee_global() external view returns (uint256);
+}
+
 contract Strategy is BaseStrategyInitializable {
     using SafeERC20 for IERC20;
     using Address for address;
@@ -40,11 +44,16 @@ contract Strategy is BaseStrategyInitializable {
     IUniswapV3Router private constant UNI_V3_ROUTER =
         IUniswapV3Router(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
+    // Provider to read current block's base fee
+    IBaseFee internal constant baseFeeProvider =
+        IBaseFee(0xf8d0Ec04e94296773cE20eFbeeA82e76220cD549);
+
     // OPS State Variables
     uint24 public aaveToStkAaveSwapFee;
     uint256 public stkAaveDiscountBps;
     bool public forceCooldown;
     uint256 public dustThreshold;
+    uint256 public maxAcceptableBaseFee;
 
     uint256 private constant MAX_BPS = 1e4;
 
@@ -69,6 +78,7 @@ contract Strategy is BaseStrategyInitializable {
         stkAaveDiscountBps = 150;
         forceCooldown = false;
         dustThreshold = 1e13;
+        maxAcceptableBaseFee = 100 * 1e9; // gwei
 
         // approve swap router spend
         approveMaxSpend(address(stkAave), address(UNI_V3_ROUTER));
@@ -106,6 +116,13 @@ contract Strategy is BaseStrategyInitializable {
         dustThreshold = _dustThreshold;
     }
 
+    function setMaxAcceptableBaseFee(uint256 _maxAcceptableBaseFee)
+        external
+        onlyVaultManagers
+    {
+        maxAcceptableBaseFee = _maxAcceptableBaseFee;
+    }
+
     function name() external view override returns (string memory) {
         return "StrategyStkAaveCooldown";
     }
@@ -118,7 +135,15 @@ contract Strategy is BaseStrategyInitializable {
         return balanceOfWant().add(discountedStkAave);
     }
 
-    function cooldownStatus() public view returns (CooldownStatus) {
+    function cooldownStatus()
+        external
+        view
+        returns (
+            CooldownStatus,
+            uint256,
+            uint256
+        )
+    {
         return _checkCooldown();
     }
 
@@ -175,8 +200,9 @@ contract Strategy is BaseStrategyInitializable {
     }
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
+        (CooldownStatus _cooldownStatus, , ) = _checkCooldown();
         if (
-            _checkCooldown() != CooldownStatus.None &&
+            _cooldownStatus != CooldownStatus.None &&
             balanceOfStkAave() > dustThreshold &&
             !forceCooldown
         ) {
@@ -202,13 +228,30 @@ contract Strategy is BaseStrategyInitializable {
         override
         returns (bool)
     {
-        CooldownStatus _cooldownStatus = _checkCooldown();
+        (CooldownStatus _cooldownStatus, , uint256 claimEnd) = _checkCooldown();
         uint256 _balanceOfStkAave = balanceOfStkAave();
+
+        if (
+            _cooldownStatus == CooldownStatus.Claim &&
+            claimEnd.sub(now) <= 1 days
+        ) {
+            return true;
+        }
+
+        if (!isCurrentBaseFeeAcceptable()) {
+            return false;
+        }
+
+        if (
+            _cooldownStatus != CooldownStatus.Initiated &&
+            _balanceOfStkAave > dustThreshold
+        ) {
+            return true;
+        }
+
         return
-            (_cooldownStatus != CooldownStatus.Initiated &&
-                _balanceOfStkAave > dustThreshold) ||
-            (_cooldownStatus == CooldownStatus.None &&
-                super.harvestTrigger(callCostInWei));
+            _cooldownStatus == CooldownStatus.None &&
+            super.harvestTrigger(callCostInWei);
     }
 
     function liquidatePosition(uint256 _amountNeeded)
@@ -255,7 +298,7 @@ contract Strategy is BaseStrategyInitializable {
         uint256 stkAaveBalance = balanceOfStkAave();
         CooldownStatus _cooldownStatus;
         if (stkAaveBalance > 0) {
-            _cooldownStatus = _checkCooldown(); // don't check status if we have no stkAave
+            (_cooldownStatus, , ) = _checkCooldown(); // don't check status if we have no stkAave
         }
 
         // If it's the claim period claim
@@ -270,7 +313,9 @@ contract Strategy is BaseStrategyInitializable {
         uint256 stkAaveBalance = balanceOfStkAave();
         if (stkAaveBalance == 0) return;
 
-        if (_checkCooldown() == CooldownStatus.None || forceCooldown) {
+        (CooldownStatus _cooldownStatus, , ) = _checkCooldown();
+
+        if (_cooldownStatus == CooldownStatus.None || forceCooldown) {
             stkAave.cooldown();
         }
     }
@@ -311,28 +356,67 @@ contract Strategy is BaseStrategyInitializable {
         return tokenToWant(weth, _amtInWei);
     }
 
-    function _checkCooldown() internal view returns (CooldownStatus) {
-        uint256 cooldownStartTimestamp = IStakedAave(stkAave).stakersCooldowns(
+    function _checkCooldown()
+        internal
+        view
+        returns (
+            CooldownStatus _cooldownStatus,
+            uint256 nextClaimStartTime,
+            uint256 nextClaimEndTime
+        )
+    {
+        uint256 cooldownStartTime = IStakedAave(stkAave).stakersCooldowns(
             address(this)
         );
         uint256 COOLDOWN_SECONDS = IStakedAave(stkAave).COOLDOWN_SECONDS();
         uint256 UNSTAKE_WINDOW = IStakedAave(stkAave).UNSTAKE_WINDOW();
-        uint256 nextClaimStartTimestamp = cooldownStartTimestamp.add(
-            COOLDOWN_SECONDS
-        );
 
-        if (cooldownStartTimestamp == 0) {
-            return CooldownStatus.None;
+        if (cooldownStartTime == 0) {
+            return (CooldownStatus.None, 0, 0);
         }
+
+        nextClaimStartTime = cooldownStartTime.add(COOLDOWN_SECONDS);
+
+        nextClaimEndTime = nextClaimStartTime.add(UNSTAKE_WINDOW);
+
         if (
-            block.timestamp > nextClaimStartTimestamp &&
-            block.timestamp <= nextClaimStartTimestamp.add(UNSTAKE_WINDOW)
+            block.timestamp > nextClaimStartTime &&
+            block.timestamp <= nextClaimEndTime
         ) {
-            return CooldownStatus.Claim;
+            return (CooldownStatus.Claim, nextClaimStartTime, nextClaimEndTime);
         }
-        if (block.timestamp < nextClaimStartTimestamp) {
-            return CooldownStatus.Initiated;
+        if (block.timestamp < nextClaimStartTime) {
+            return (
+                CooldownStatus.Initiated,
+                nextClaimStartTime,
+                nextClaimEndTime
+            );
         }
+
+        return (CooldownStatus.None, 0, 0);
+    }
+
+    // Check if current block's base fee is under max allowed base fee
+    function isCurrentBaseFeeAcceptable() public view returns (bool) {
+        uint256 baseFee;
+        uint256 _maxAcceptableBaseFee = maxAcceptableBaseFee;
+
+        // Ignore if set to 0
+        if (_maxAcceptableBaseFee == 0) {
+            return true;
+        }
+
+        try baseFeeProvider.basefee_global() returns (uint256 currentBaseFee) {
+            baseFee = currentBaseFee;
+        } catch {
+            // Useful for testing until ganache supports london fork
+            // Hard-code current base fee to 1000 gwei
+            // This should also help keepers that run in a fork without
+            // baseFee() to avoid reverting and potentially abandoning the job
+            baseFee = 1000 * 1e9;
+        }
+
+        return baseFee <= _maxAcceptableBaseFee;
     }
 
     function getTokenOutPathV2(address _token_in, address _token_out)

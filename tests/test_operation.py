@@ -100,9 +100,10 @@ def test_withdraw(
 
 
 def test_harvest_after_long_idle_period(
-    chain, token, vault, strategy, user, strategist, amount
+    chain, token, vault, strategy, user, gov, strategist, amount
 ):
     # Deposit to the vault
+    user_balance_before = token.balanceOf(user)
     actions.user_deposit(user, vault, token, amount)
 
     # harvest
@@ -119,8 +120,14 @@ def test_harvest_after_long_idle_period(
 
     utils.sleep((10 * 24 * 3600) + 1)
     utils.strategy_status(vault, strategy)
-    strategy.harvest({"from": strategist})
+    vault.revokeStrategy(strategy.address, {"from": gov})
+    tx = strategy.harvest({"from": strategist})
     utils.strategy_status(vault, strategy)
+    assert tx.events["Harvested"]["profit"] > 0
+
+    # withdrawal
+    vault.withdraw({"from": user})
+    assert token.balanceOf(user) > user_balance_before
 
 
 def test_emergency_exit(

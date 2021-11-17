@@ -53,7 +53,7 @@ contract Strategy is BaseStrategyInitializable {
     uint256 public stkAaveDiscountBps;
     bool public forceCooldown;
     uint256 public dustThreshold;
-    uint256 public maxAcceptableBaseFee;
+    uint256 public maxAcceptableBaseFee; // in wei, should be something like 100 gwei (100e9)
 
     uint256 private constant MAX_BPS = 1e4;
 

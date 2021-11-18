@@ -125,6 +125,8 @@ def test_harvest_after_long_idle_period(
     utils.strategy_status(vault, strategy)
     assert tx.events["Harvested"]["profit"] > 0
 
+    utils.sleep()
+
     # withdrawal
     vault.withdraw({"from": user})
     assert token.balanceOf(user) > user_balance_before

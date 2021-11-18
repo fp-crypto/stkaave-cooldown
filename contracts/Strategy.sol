@@ -231,6 +231,7 @@ contract Strategy is BaseStrategyInitializable {
         (CooldownStatus _cooldownStatus, , uint256 claimEnd) = _checkCooldown();
         uint256 _balanceOfStkAave = balanceOfStkAave();
 
+        // Harvest immediately if claim period and less than 1 day to claim
         if (
             _cooldownStatus == CooldownStatus.Claim &&
             claimEnd.sub(now) <= 1 days
@@ -238,10 +239,14 @@ contract Strategy is BaseStrategyInitializable {
             return true;
         }
 
+        // Don't harvest if baseFee too high
         if (!isCurrentBaseFeeAcceptable()) {
             return false;
         }
 
+        // Harvest if we have stkAave and either
+        //  - we haven't started a cooldown
+        //  - it's the claim period
         if (
             _cooldownStatus != CooldownStatus.Initiated &&
             _balanceOfStkAave > dustThreshold
@@ -249,6 +254,7 @@ contract Strategy is BaseStrategyInitializable {
             return true;
         }
 
+        // Otherwise use the BaseStrategy harvestTrigger
         return
             _cooldownStatus == CooldownStatus.None &&
             super.harvestTrigger(callCostInWei);

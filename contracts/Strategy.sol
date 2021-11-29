@@ -2,9 +2,7 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-import {BaseStrategyInitializable} from "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
-
-import {SafeERC20, SafeMath, IERC20, Address} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@yearn/yearn-vaults/contracts/BaseStrategy.sol";
 
 import "@openzeppelin/contracts/math/Math.sol";
 
@@ -18,10 +16,6 @@ interface IBaseFee {
 }
 
 contract Strategy is BaseStrategyInitializable {
-    using SafeERC20 for IERC20;
-    using Address for address;
-    using SafeMath for uint256;
-
     // Token addresses
     address private constant aave = 0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9;
     IStakedAave private constant stkAave =
@@ -76,7 +70,6 @@ contract Strategy is BaseStrategyInitializable {
 
         aaveToStkAaveSwapFee = 3000;
         stkAaveDiscountBps = 150;
-        forceCooldown = false;
         dustThreshold = 1e13;
         maxAcceptableBaseFee = 100 * 1e9; // gwei
 
@@ -186,7 +179,6 @@ contract Strategy is BaseStrategyInitializable {
                 // but it will still be there for the next harvest
             } else {
                 // NOTE: amountRequired is always equal or greater than _debtOutstanding
-                // important to use amountRequired just in case amountAvailable is > amountAvailable
                 _debtPayment = _debtOutstanding;
                 _profit = amountAvailable.sub(_debtPayment);
             }
@@ -201,6 +193,10 @@ contract Strategy is BaseStrategyInitializable {
 
     function adjustPosition(uint256 _debtOutstanding) internal override {
         (CooldownStatus _cooldownStatus, , ) = _checkCooldown();
+        // Don't adjust position (it will reset the cooldown timer) if we are:
+        //   - currently performing a cooldown or in a claim period
+        //   - we have a non-dust balance of stkAave
+        //   - not forcing cooldown
         if (
             _cooldownStatus != CooldownStatus.None &&
             balanceOfStkAave() > dustThreshold &&

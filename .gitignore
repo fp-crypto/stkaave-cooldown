@@ -5,3 +5,5 @@ build/
 reports/
 bin/
 lib/
+node_modules/
+vyper_git_version.txt
